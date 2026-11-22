@@ -147,6 +147,13 @@ masks, so the question "what is this weird branch" is usually answered before yo
 
 ## Install
 
+> This is the Trajectory Labs fork of [sjawhar/knives](https://github.com/sjawhar/knives). The
+> branch `trajectory` carries a few commits on an upstream tag. Each `v<version>-trajectory.<n>` tag
+> is a release built by `.github/workflows/trajectory-release.yml`; upstream's `release.yml` is
+> disabled on this fork. agent-c installs a pinned release, together with the jj build it needs from
+> [trajectory-labs-pbc/jj](https://github.com/trajectory-labs-pbc/jj/releases), with
+> `python3 tools/ci/src/agent_c_ci/forks.py install-knives`. The steps below are upstream's.
+
 ### Prerequisites
 
 - `git`, `curl`, `tar`.
