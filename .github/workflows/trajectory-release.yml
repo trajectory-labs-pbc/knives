@@ -1,0 +1,129 @@
+name: Trajectory release
+
+# A pushed tag v<upstream version>-trajectory.<n> builds that commit and publishes it as a release.
+on:
+  push:
+    tags: ['v*-trajectory.*']
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  # Attestation lets a consumer verify the archive's provenance against GitHub's
+  # trust root before it gets write access to their repositories.
+  id-token: write
+  attestations: write
+
+env:
+  CARGO_TERM_COLOR: always
+  # knives links jj-lib 0.45.1 and runs `jj` from PATH, so the release ships the jj it matches.
+  JJ_TAG: v0.45.1-sami.20260910-043938
+  JJ_SHA256: 19f6ffdecb4b3eb9e15bdeb3248f891c9e2f26fffe816c2771171243f96e01db
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-x86_64
+
+      - run: cargo build --release --locked
+
+      - name: Fetch jj
+        run: |
+          set -euo pipefail
+          archive="jj-${JJ_TAG}-x86_64-unknown-linux-musl.tar.gz"
+          curl -fsSLO "https://github.com/trajectory-labs-pbc/jj/releases/download/${JJ_TAG}/${archive}"
+          echo "${JJ_SHA256}  ${archive}" | sha256sum -c -
+          mkdir jj && tar xzf "$archive" -C jj ./jj
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          staging="knives-${GITHUB_REF_NAME}-linux-x86_64"
+          mkdir -p "$staging/bin" \
+                   "$staging/libexec/knives" \
+                   "$staging/share/knives/opencode/plugins/lib" \
+                   "$staging/share/knives/opencode/skills"
+          install -m 0755 target/release/knives "$staging/libexec/knives/knives"
+          install -m 0755 jj/jj "$staging/libexec/knives/jj"
+          install -m 0755 packaging/knives.sh "$staging/bin/knives"
+          # knives.ts imports ./lib/internals.ts, so both ship, and internals stays
+          # in a subdirectory: OpenCode's plugin auto-discovery globs `*.ts` at the
+          # top level only, and it calls every export of anything it finds.
+          install -m 0644 plugin/knives.ts "$staging/share/knives/opencode/plugins/knives.ts"
+          install -m 0644 plugin/lib/internals.ts "$staging/share/knives/opencode/plugins/lib/internals.ts"
+          # Every skill, each in its own directory, which is how they are discovered.
+          cp -r skills/. "$staging/share/knives/opencode/skills/"
+          tar czf "${staging}.tar.gz" "$staging"
+
+      - name: Verify release archive
+        run: |
+          set -euo pipefail
+          staging="knives-${GITHUB_REF_NAME}-linux-x86_64"
+          archive="${staging}.tar.gz"
+          for artifact in \
+            "$staging/bin/knives" \
+            "$staging/libexec/knives/knives" \
+            "$staging/libexec/knives/jj" \
+            "$staging/share/knives/opencode/plugins/knives.ts" \
+            "$staging/share/knives/opencode/plugins/lib/internals.ts" \
+            "$staging/share/knives/opencode/skills/fork-work/SKILL.md" \
+            "$staging/share/knives/opencode/skills/using-knives/SKILL.md" \
+            "$staging/share/knives/opencode/skills/pr-preflight/SKILL.md" \
+            "$staging/share/knives/opencode/skills/maintaining-fork-release/SKILL.md" \
+            "$staging/share/knives/opencode/skills/maintaining-fork-pr/SKILL.md"; do
+            if ! tar --list --gzip --file="$archive" | grep --fixed-strings --line-regexp -- "$artifact" >/dev/null; then
+              printf 'release archive is missing required artifact: %s\n' "$artifact" >&2
+              exit 1
+            fi
+          done
+
+      - name: Smoke-test the packaged binary
+        run: |
+          set -euo pipefail
+          staging="knives-${GITHUB_REF_NAME}-linux-x86_64"
+          "./$staging/bin/knives" --help >/dev/null
+          "./$staging/bin/knives" --version
+          "./$staging/libexec/knives/jj" --version | grep -F 'jj 0.45.1'
+          # Through a symlink, as installed, the launcher still finds libexec.
+          ln -s "$PWD/$staging/bin/knives" knives-link
+          env -i PATH=/usr/bin:/bin ./knives-link --version
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: knives-linux-x86_64
+          path: knives-*-linux-x86_64.tar.gz
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+
+      - name: Generate checksums
+        run: |
+          set -euo pipefail
+          (cd knives-linux-x86_64 && sha256sum ./*.tar.gz > ../SHA256SUMS)
+
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: knives-linux-x86_64/knives-*-linux-x86_64.tar.gz
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "${GITHUB_REF_NAME}" -R "${GITHUB_REPOSITORY}" \
+            --title "${GITHUB_REF_NAME}" \
+            --notes "knives built from ${GITHUB_SHA}, the branch trajectory of this fork." \
+            knives-linux-x86_64/knives-*-linux-x86_64.tar.gz \
+            SHA256SUMS
