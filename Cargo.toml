@@ -60,7 +60,7 @@ toml = "0.9"
 # Default features ship the crate's CLI and TUI — clap, ratatui, a clipboard —
 # plus a rejected license and three unmaintained-crate advisories; the encoder
 # itself needs none of that.
-toon-format = { version = "=0.5.0", git = "https://github.com/sjawhar/toon-rust", rev = "9f0a88fab65727a0384db1794b6a26e6fa5b2002", default-features = false }
+toon-format = { version = "=0.5.0", git = "https://github.com/trajectory-labs-pbc/toon-rust", rev = "9f0a88fab65727a0384db1794b6a26e6fa5b2002", default-features = false }
 
 [dev-dependencies]
 # Runs the lab fixture's `XDG_CONFIG_HOME` isolation before `main` (see
