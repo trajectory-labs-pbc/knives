@@ -1,17 +1,12 @@
 name: Release
 
+# A pushed tag v<upstream version>-trajectory.<n> builds that commit and publishes it as a release.
 on:
   push:
-    branches: [main]
+    tags: ['v*-trajectory.*']
 
-# One release at a time. GitHub delivered one merge's push event twice, three
-# seconds apart; both runs computed the same version from the same tags and the
-# second died at `git tag` with "already exists". Two merges inside one build
-# window race the same way. Serialised, the later run sees the earlier one's tag
-# and steps aside; a third run supersedes the queued one, which is right, since
-# its head carries everything the queued one would have released.
 concurrency:
-  group: release
+  group: release-${{ github.ref_name }}
   cancel-in-progress: false
 
 permissions:
@@ -25,60 +20,8 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  version:
-    name: Determine Version
-    runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.release.outputs.version }}
-      should_release: ${{ steps.release.outputs.should_release }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Install Cocogitto
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cocogitto@7.0.0
-
-      - name: Determine version bump
-        id: release
-        run: |
-          set -euo pipefail
-          version="$(cog bump --dry-run --auto)"
-          if [[ "$version" == *"No conventional commits for your repository that required a bump."* ]]; then
-            echo "should_release=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          if ! [[ "$version" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            printf 'Cocogitto did not return a SemVer version: %s\n' "$version" >&2
-            exit 1
-          fi
-
-          # Cocogitto keeps breaking changes below 1.0 on the minor line; knives
-          # treats them as a major release even before its 1.0.0 release.
-          latest_tag="$(git describe --tags --abbrev=0)"
-          if [[ "$version" =~ ^v0\. ]] &&
-            git log "$latest_tag..HEAD" --format=%B |
-              grep -qE '^[[:lower:]]+(\(.+\))?!:|BREAKING CHANGE'; then
-            version="$(cog bump --dry-run --major)"
-          fi
-
-          # A run queued behind one that already cut this version: nothing to build.
-          if git ls-remote --exit-code --tags origin "refs/tags/${version}" >/dev/null 2>&1; then
-            echo "${version} is already tagged on origin; nothing to release"
-            echo "should_release=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          echo "version=${version#v}" >> "$GITHUB_OUTPUT"
-          echo "should_release=true" >> "$GITHUB_OUTPUT"
-
   build:
     name: Build
-    needs: version
-    if: needs.version.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -87,15 +30,12 @@ jobs:
         with:
           key: release-x86_64
 
-      - name: Set release version
-        run: sed -i '0,/^version = ".*"/s//version = "${{ needs.version.outputs.version }}"/' Cargo.toml
-
-      - run: cargo build --release
+      - run: cargo build --release --locked
 
       - name: Package
         run: |
           set -euo pipefail
-          staging="knives-v${{ needs.version.outputs.version }}-linux-x86_64"
+          staging="knives-${GITHUB_REF_NAME}-linux-x86_64"
           mkdir -p "$staging/bin" \
                    "$staging/share/knives/opencode/plugins/lib" \
                    "$staging/share/knives/opencode/skills"
@@ -112,7 +52,7 @@ jobs:
       - name: Verify release archive
         run: |
           set -euo pipefail
-          staging="knives-v${{ needs.version.outputs.version }}-linux-x86_64"
+          staging="knives-${GITHUB_REF_NAME}-linux-x86_64"
           archive="${staging}.tar.gz"
           for artifact in \
             "$staging/bin/knives" \
@@ -132,7 +72,7 @@ jobs:
       - name: Smoke-test the packaged binary
         run: |
           set -euo pipefail
-          staging="knives-v${{ needs.version.outputs.version }}-linux-x86_64"
+          staging="knives-${GITHUB_REF_NAME}-linux-x86_64"
           "./$staging/bin/knives" --help >/dev/null
           "./$staging/bin/knives" --version
 
@@ -143,95 +83,27 @@ jobs:
 
   release:
     name: Create Release
-    needs: [version, build]
+    needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ssh-key: ${{ secrets.DEPLOY_KEY }}
-          fetch-depth: 0
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - name: Bump version in repo
-        run: |
-          set -euo pipefail
-          VERSION="${{ needs.version.outputs.version }}"
-          # The plugin shells out to the binary, so both carry the same version
-          # and are released together.
-          sed -i '0,/^version = ".*"/s//version = "'"$VERSION"'"/' Cargo.toml
-          sed -i '0,/"version": ".*"/s//"version": "'"$VERSION"'"/' package.json
-          sed -i '0,/"version": ".*"/s//"version": "'"$VERSION"'"/' .claude-plugin/plugin.json
-          for version_file in Cargo.toml package.json .claude-plugin/plugin.json; do
-            if ! grep --fixed-strings --quiet "$VERSION" "$version_file"; then
-              printf 'release version %s was not written to %s\n' "$VERSION" "$version_file" >&2
-              exit 1
-            fi
-          done
-          cargo update --workspace
-          # The fuzz crate locks knives by path; CI builds it with --locked, so
-          # its lock must carry the new version too.
-          cargo update --manifest-path fuzz/Cargo.toml --workspace
-
-      - name: Commit and tag
-        id: tag
-        run: |
-          set -euo pipefail
-          VERSION="${{ needs.version.outputs.version }}"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # The tags and trunk as they are now, not as they were at checkout: the
-          # build took minutes, and another run may have released meanwhile.
-          git fetch --quiet origin main "+refs/tags/*:refs/tags/*"
-          if git rev-parse --quiet --verify "refs/tags/v${VERSION}^{commit}" >/dev/null; then
-            echo "v${VERSION} is already tagged at $(git rev-parse --short "v${VERSION}"); another run released it"
-            echo "released=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if [[ "$(git rev-parse origin/main)" != "$(git rev-parse HEAD)" ]]; then
-            # The archive was built from HEAD; releasing it as the tip of a trunk
-            # that has moved on would ship a tag whose content is not the tag's.
-            echo "main moved past ${GITHUB_SHA} to $(git rev-parse --short origin/main); its own run will release"
-            echo "released=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          git add Cargo.toml Cargo.lock fuzz/Cargo.lock package.json .claude-plugin/plugin.json
-          # The first release takes its version from Cargo.toml, so the files can
-          # already be at VERSION and there is nothing to commit. Tag either way.
-          if git diff --cached --quiet; then
-            echo "version files already at v${VERSION}; tagging without a bump commit"
-          else
-            git commit -m "chore: release v${VERSION} [skip ci]"
-          fi
-          git tag "v${VERSION}"
-          # Atomic: the trunk and the tag land together or not at all. Separately, a
-          # rejected trunk push leaves a tag on a bump commit main never had.
-          git push --atomic origin main "refs/tags/v${VERSION}"
-          echo "released=true" >> "$GITHUB_OUTPUT"
-
       - uses: actions/download-artifact@v4
-        if: steps.tag.outputs.released == 'true'
 
       - name: Generate checksums
-        if: steps.tag.outputs.released == 'true'
         run: |
           set -euo pipefail
           (cd knives-linux-x86_64 && sha256sum ./*.tar.gz > ../SHA256SUMS)
 
       - uses: actions/attest-build-provenance@v2
-        if: steps.tag.outputs.released == 'true'
         with:
           subject-path: knives-linux-x86_64/knives-*-linux-x86_64.tar.gz
 
       - name: Create GitHub Release
-        if: steps.tag.outputs.released == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          VERSION="${{ needs.version.outputs.version }}"
-          gh release create "v${VERSION}" \
-            --title "v${VERSION}" \
-            --generate-notes \
+          gh release create "${GITHUB_REF_NAME}" -R "${GITHUB_REPOSITORY}" \
+            --title "${GITHUB_REF_NAME}" \
+            --notes "knives built from ${GITHUB_SHA}, the branch trajectory of this fork." \
             knives-linux-x86_64/knives-*-linux-x86_64.tar.gz \
             SHA256SUMS

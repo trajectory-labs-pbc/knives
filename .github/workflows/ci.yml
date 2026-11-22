@@ -1,7 +1,7 @@
 name: ci
 on:
   push:
-    branches: [main]
+    branches: [main, trajectory]
   pull_request:
 
 env:
@@ -80,13 +80,13 @@ jobs:
             echo 'could not read the jj-lib version from Cargo.toml' >&2
             exit 1
           fi
-          tag=$(gh api repos/sjawhar/jj/releases --jq '.[].tag_name' | grep -m1 "^v${jj_version}-sami\.")
+          tag=$(gh api repos/trajectory-labs-pbc/jj/releases --jq '.[].tag_name' | grep -m1 "^v${jj_version}-sami\.")
           if [ -z "$tag" ]; then
-            echo "no sjawhar/jj release for jj ${jj_version}" >&2
+            echo "no trajectory-labs-pbc/jj release for jj ${jj_version}" >&2
             exit 1
           fi
           archive="jj-${tag}-x86_64-unknown-linux-musl.tar.gz"
-          gh release download -R sjawhar/jj "$tag" -p "$archive"
+          gh release download -R trajectory-labs-pbc/jj "$tag" -p "$archive"
           # The tarball stores its entries under ./, so name the member explicitly.
           sudo tar xzf "$archive" -C /usr/local/bin ./jj
           jj --version

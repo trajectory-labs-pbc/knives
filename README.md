@@ -147,6 +147,11 @@ masks, so the question "what is this weird branch" is usually answered before yo
 
 ## Install
 
+This is the Trajectory Labs fork of [sjawhar/knives](https://github.com/sjawhar/knives), on the
+branch `trajectory`. Its releases are tagged `v<upstream version>-trajectory.<n>`. In agent-c,
+`python3 tools/ci/src/agent_c_ci/forks.py install-knives` installs the pinned release together
+with the jj build it needs. The steps below install by hand.
+
 ### Prerequisites
 
 - `git`, `curl`, `tar`.
@@ -161,13 +166,13 @@ masks, so the question "what is this weird branch" is usually answered before yo
 
   ```
   t=v0.45.1-sami.20260910-043938
-  curl -fsSL "https://github.com/sjawhar/jj/releases/download/$t/jj-$t-x86_64-unknown-linux-musl.tar.gz" \
+  curl -fsSL "https://github.com/trajectory-labs-pbc/jj/releases/download/$t/jj-$t-x86_64-unknown-linux-musl.tar.gz" \
     | tar xzf - ./jj
   install -Dm755 jj ~/.local/bin/jj
   ```
 
   (On macOS or ARM Linux, take the matching asset from the
-  [same release](https://github.com/sjawhar/jj/releases/tag/v0.45.1-sami.20260910-043938).)
+  [same release](https://github.com/trajectory-labs-pbc/jj/releases/tag/v0.45.1-sami.20260910-043938).)
 
 knives reads a checkout's identity through git, so a jj workspace must carry a `.git` file beside
 its `.jj`: work in a colocated jj repository (`jj git init --colocate`, or `jj git clone --colocate`).
@@ -181,8 +186,8 @@ Release archives are built for Linux x86_64 only; elsewhere, build from source (
 Download the latest release archive and unpack it under `~/.local/opt`:
 
 ```
-v=$(curl -fsSL https://api.github.com/repos/sjawhar/knives/releases/latest | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p')
-curl -fsSLO "https://github.com/sjawhar/knives/releases/download/$v/knives-$v-linux-x86_64.tar.gz"
+v=$(curl -fsSL https://api.github.com/repos/trajectory-labs-pbc/knives/releases/latest | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p')
+curl -fsSLO "https://github.com/trajectory-labs-pbc/knives/releases/download/$v/knives-$v-linux-x86_64.tar.gz"
 mkdir -p ~/.local/opt && tar xzf "knives-$v-linux-x86_64.tar.gz" -C ~/.local/opt
 install -Dm755 ~/.local/opt/knives-$v-linux-x86_64/bin/knives ~/.local/bin/knives
 ```
@@ -193,11 +198,11 @@ then open a new shell), and check with `knives --version`.
 Or with [mise](https://mise.jdx.dev), using the `v` resolved in the first line above:
 
 ```
-mise use -g "github:sjawhar/knives@$v"
+mise use -g "github:trajectory-labs-pbc/knives@$v"
 ```
 
-A bare `github:sjawhar/knives` can resolve to an older release, because mise skips releases younger
-than `minimum_release_age` (24 hours by default, or the value you configure); add `minimum_release_age_excludes = ["github:sjawhar/knives"]` under
+A bare `github:trajectory-labs-pbc/knives` can resolve to an older release, because mise skips releases younger
+than `minimum_release_age` (24 hours by default, or the value you configure); add `minimum_release_age_excludes = ["github:trajectory-labs-pbc/knives"]` under
 `[settings]` to take the newest.
 
 ### Plugins
@@ -205,7 +210,7 @@ than `minimum_release_age` (24 hours by default, or the value you configure); ad
 Install the Claude Code plugin separately:
 
 ```
-/plugin marketplace add sjawhar/knives
+/plugin marketplace add trajectory-labs-pbc/knives
 /plugin install knives@knives
 ```
 
