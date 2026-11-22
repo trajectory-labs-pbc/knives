@@ -147,12 +147,25 @@ masks, so the question "what is this weird branch" is usually answered before yo
 
 ## Install
 
-> This is the Trajectory Labs fork of [sjawhar/knives](https://github.com/sjawhar/knives). The
-> branch `trajectory` carries a few commits on an upstream tag. Each `v<version>-trajectory.<n>` tag
-> is a release built by `.github/workflows/trajectory-release.yml`; upstream's `release.yml` is
-> disabled on this fork. agent-c installs a pinned release, together with the jj build it needs from
-> [trajectory-labs-pbc/jj](https://github.com/trajectory-labs-pbc/jj/releases), with
-> `python3 tools/ci/src/agent_c_ci/forks.py install-knives`. The steps below are upstream's.
+> This is the Trajectory Labs fork of [sjawhar/knives](https://github.com/sjawhar/knives); see
+> [FORK.md](FORK.md). Its release archive carries the jj build that knives needs in
+> `libexec/knives/`, and its `bin/knives` runs knives with that jj first on `PATH`. So skip the jj
+> prerequisite below, and install with a link, not a copy, so that `bin/knives` finds `libexec/`:
+>
+> ```
+> v=$(gh release view -R trajectory-labs-pbc/knives --json tagName -q .tagName)
+> gh release download "$v" -R trajectory-labs-pbc/knives -p "knives-$v-linux-x86_64.tar.gz" &&
+>   gh attestation verify "knives-$v-linux-x86_64.tar.gz" -R trajectory-labs-pbc/knives &&
+>   mkdir -p ~/.local/opt ~/.local/bin && tar xzf "knives-$v-linux-x86_64.tar.gz" -C ~/.local/opt &&
+>   ln -sfn ~/.local/opt/knives-$v-linux-x86_64/bin/knives ~/.local/bin/knives
+> ```
+>
+> That jj is a 0.45.1 build which can lose a commit when two workspaces of one repository run jj
+> at the same time. Run one knives workspace per repository at a time. In a checkout that knives
+> manages, run jj as `~/.local/opt/knives-<tag>-linux-x86_64/libexec/knives/jj`, not the `jj` on
+> `PATH`, which can be a different version.
+>
+> The rest of this section is upstream's.
 
 ### Prerequisites
 
